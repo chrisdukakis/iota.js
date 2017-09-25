@@ -1,5 +1,6 @@
 var gulp       = require('gulp'),
     jshint     = require('gulp-jshint'),
+    gutil      = require('gulp-util'),
     uglify     = require('gulp-uglify'),
     rename     = require('gulp-rename'),
     source     = require("vinyl-source-stream"),
@@ -44,6 +45,7 @@ gulp.task('dist', function() {
         .pipe(rename('iota.min.js'))
         .pipe(buffer())
         .pipe(uglify())
+        .on('error', function (err) { console.log(gutil.colors.red('[Error]'), err.toString()); })
         .pipe(gulp.dest(DEST));
 });
 
