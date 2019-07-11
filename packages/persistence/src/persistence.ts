@@ -7,6 +7,7 @@ import * as Promise from 'bluebird'
 import { EventEmitter } from 'events'
 import * as errors from '../../errors'
 import { isTrits } from '../../guards'
+import '../../typed-array'
 import {
     Persistence,
     PersistenceAdapter,

@@ -1,4 +1,4 @@
-import 'core-js/features/typed-array'
+import '../../typed-array'
 import * as errors from '../../errors'
 import { Tag, Trytes } from '../../types'
 
