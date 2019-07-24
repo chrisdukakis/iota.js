@@ -84,20 +84,23 @@ export const bundleWithInvalidSignature = [...bundle].map(transaction => ({
     signatureMessageFragment: transaction.signatureMessageFragment.slice(0, 27 * 81 - 9).concat('9'.repeat(81)),
 }))
 
-export const bundleWithInvalidValueSum = [...bundle].map(
-    (transaction, i) =>
-        i === 0
-            ? {
-                  ...transaction,
-                  value: transaction.value + 23128,
-              }
-            : transaction
+export const bundleWithInvalidValueSum = [...bundle].map((transaction, i) =>
+    i === 0
+        ? {
+              ...transaction,
+              value: transaction.value + 23128,
+          }
+        : transaction
 )
 
 export const bundleWithInvalidBundleHash = [...bundle].map((transaction, i) => ({
     ...transaction,
     bundle: 'B'.repeat(81),
 }))
+
+const bundleCopy = [...bundle] as Transaction[]
+bundleCopy[1] = { ...bundle[1], bundle: 'B'.repeat(81) }
+export const bundleWithInvalidBundleField = bundleCopy
 
 export const bundleWithInvalidTransactionOrder = [...bundle].reverse()
 

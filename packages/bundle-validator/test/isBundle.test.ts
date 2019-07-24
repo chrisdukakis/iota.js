@@ -1,5 +1,6 @@
 import {
     bundle,
+    bundleWithInvalidBundleField,
     bundleWithInvalidBundleHash,
     bundleWithInvalidLastIndex,
     bundleWithInvalidSignature,
@@ -31,6 +32,14 @@ test('isBundle() returns false for bundle with invalid bundle hash.', t => {
         isBundle(bundleWithInvalidBundleHash),
         false,
         'isBundle() should return false for bundle with invalid bundle hash.'
+    )
+})
+
+test('isBundle() returns false for bundle with invalid bundle field.', t => {
+    t.is(
+        isBundle(bundleWithInvalidBundleField),
+        false,
+        'isBundle() should return false for bundle with invalid bundle field.'
     )
 })
 

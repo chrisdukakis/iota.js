@@ -71,6 +71,11 @@ export default function isBundle(bundle: Bundle) {
         signatureFragments: Trytes[]
     }> = []
 
+    // Bundle fields should be identical.
+    if (bundle.some(tx => tx.bundle !== bundleHash)) {
+        return false
+    }
+
     // Addresses of value txs must have last trit == 0.
     if (bundle.some(tx => tx.value !== 0 && trits(tx.address)[HASH_TRITS_SIZE - 1] !== 0)) {
         return false
