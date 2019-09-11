@@ -2,45 +2,67 @@
 
 /** @module bundle-miner */
 
+const { tritsToValue, valueToTrits } = require('@iota/converter')
+const Kerl = require('@iota/kerl')
+const Signing = require('@iota/signing')
 const {
+    ADDRESS_LENGTH,
+    VALUE_LENGTH,
+    OBSOLETE_TAG_LENGTH,
+    BUNDLE_LENGTH,
     TAG_LENGTH,
     TRANSACTION_LENGTH,
     TRANSACTION_ESSENCE_LENGTH,
     transactionEssence,
-    isMultipleOfTransactionLength,
 } = require('@iota/transaction')
-const {
-    NORMALIZED_FRAGMENT_LENGTH,
-    MAX_TRYTE_VALUE,
-} = require('@iota/signing')
-const { valueToTrits, tritsToValue } = require('@iota/converter')
-const pad = require('@iota/pad')
-const { Worker } = require('worker_threads')
-const { EventEmitter } = require('events')
 
-function minNormalizedBundle(normalizedBundles, securityLevel) {
-    const values = normalizedBundles[0]
-        .slice(0, securityLevel * NORMALIZED_FRAGMENT_LENGTH)
-        .map(v => MAX_TRYTE_VALUE - v)
+const { MAX_TRYTE_VALUE, MIN_TRYTE_VALUE, NORMALIZED_FRAGMENT_LENGTH } = Signing
 
-    for (let i = 1; i < normalizedBundles.length; i++) {
-        for (let j = 0; j < securityLevel * NORMALIZED_FRAGMENT_LENGTH; j++) {
-            values[j] = Math.min(MAX_TRYTE_VALUE - normalizedBundles[i][j], values[j])
+function minNormalizedBundle(normalizedBundles, numberOfFragments) {
+    const min = new Int8Array(numberOfFragments * NORMALIZED_FRAGMENT_LENGTH).fill(MIN_TRYTE_VALUE)
+
+    for (let i = 0; i < normalizedBundles.length; i++) {
+        for (let j = 0; j < min.length; j++) {
+            if (MAX_TRYTE_VALUE - normalizedBundles[i][j] < MAX_TRYTE_VALUE - min[j]) {
+                min[j] = normalizedBundles[i][j]
+            }
         }
     }
 
-    return values
+    return min
 }
 
 function bundleEssence(bundle) {
     const bundleCopy = bundle.slice()
-    const essence = new Int8Array((bundleCopy.length / TRANSACTION_LENGTH) * TRANSACTION_ESSENCE_LENGTH)
+    const essence = new Int8Array((bundle.length / TRANSACTION_LENGTH) * TRANSACTION_ESSENCE_LENGTH)
 
-    for (let offset = 0; offset < bundleCopy.length; offset += TRANSACTION_LENGTH) {
+    for (let offset = 0; offset < bundle.length; offset += TRANSACTION_LENGTH) {
         essence.set(transactionEssence(bundleCopy, offset))
     }
 
-		return essence
+    return essence
+}
+
+function summaryOfLosing(normalizedBundle, numberOfFragments) {
+    let P = 0
+
+    for (let i = 0; i < numberOfFragments * NORMALIZED_FRAGMENT_LENGTH; i++) {
+        const Pi = 1 - (MAX_TRYTE_VALUE - normalizedBundle[i]) / (MAX_TRYTE_VALUE - MIN_TRYTE_VALUE)
+
+        if (Pi > 0) {
+            if (P === 0) {
+                P = 1
+            }
+
+            P *= Pi
+        }
+    }
+
+    return P
+}
+
+function securityLevel(probabilityOfLosing, radix) {
+    return Math.log(1 / probabilityOfLosing) / Math.log(radix)
 }
 
 /**
@@ -50,153 +72,97 @@ function bundleEssence(bundle) {
  * 2. A new bundle that moves funds from the used address.
  * 3. The security level of the used address.
  *
- * Bundle miner offers an interface to stop and resume search.
- * It is also an event emitter that triggers the following events;
- *
- * 1. `data`: `{ index }` - Best known index value.
- * 2. `end`: `{ index }` - Index value that gives bundle with required security threshold.
- * 3. `error`: `Error` - Emitted when a thread returns an error.
  *
  * @method createBundleMiner
  *
- * @param {Int8Array} params.normalizedBundle - Previous normalized bundle hash(es).
- * @param {Int8Array} params.bundle - Bundle that sweeps funds from already used address.
- * @param {number} threshold - Threshold value to stop, once required security level is reached.
- * @param {number} [securityLevel=2] - Security level of spent address.
- * @param {number} [numberOfWorkers=1] - Number of threads to use.
- * @param {number} [valuesPerWorkerRound=1000] - How many indexes to check per round. Increasing results to less ipc.
+ * @param {Int8Array} params.signedNormalizedBundle - Aggregated normalized bundle minimum, that has been used to produce known signatures.
+ * @param {Int8Array} params.essence - Essence of bundle that sweeps funds from already used address.
+ * @param {number} params.numberOfFragments - Number of fragments to mine for. Should match with security level of used address.
+ * @param {number} params.offset - Index offset to start mining from.
+ * @param {number} params.count - How many indexes to check.
  *
  * @return {object} - bundle miner object with start()/stop() methods.
  */
-function createBundleMiner({
-		normalizedBundles,
-		bundle,
-    threshold = 100, // TODO: define default threshold
-    securityLevel = 2,
-		numberOfWorkers = 1,
-		valuesPerWorkerRound = 10 ** 3,
-}) {
-    if  (normalizedBundles.some(normalizedBundle => normalizedBundle.length < NORMALIZED_FRAGMENT_LENGTH * securityLevel)) {
-        throw new Error('Illegal normalized bundle length.')
+function createBundleMiner({ signedNormalizedBundle, essence, numberOfFragments, offset, count }) {
+    if (signedNormalizedBundle.length < NORMALIZED_FRAGMENT_LENGTH * numberOfFragments) {
+        throw new Error('Illegal `signedNormalizedBundle` length. Must correspond to `numberOfFragments`.')
     }
 
-		if (!isMultipleOfTransactionLength(bundle.length)) {
-				throw new Error('Illegal bundle length')
-		}
-
-    if ([1, 2, 3].indexOf(securityLevel) === -1) {
-        throw new Error('Illegal security level.')
+    if (essence.length === 0 || essence.length % TRANSACTION_ESSENCE_LENGTH !== 0) {
+        throw new Error('Illegal `essence` length.')
     }
 
-		let running = false
-		let n = 0
+    if ([1, 2, 3].indexOf(numberOfFragments) === -1) {
+        throw new Error('Illegal `numberOfFragments` value. Must be 1, 2 or 3.')
+    }
 
-		const workers = []
-		const target = {}
-		const bundleMiner = bundleMinerMixin.call(target)
-		const startCommand = () => ({
-				command: 'start',
-				essence: bundleEssence(bundle),
-				minNormalizedBundle: minNormalizedBundle(normalizedBundles, securityLevel),
-				count: valuesPerWorkerRound,
-				index: n++ * valuesPerWorkerRound,
-		})
-		const stopCommand = {
-				command: 'stop',
-		}
+    if (offset < 0 || !Number.isInteger(offset)) {
+        throw new Error('Illegal `offset` value. Must be 0 or a positive integer.')
+    }
 
-    let opt = Number.POSITIVE_INFINITY
+    if (count <= 0 || !Number.isInteger(count)) {
+        throw new Error('Illegal `count` value. Must be a positive integer.')
+    }
 
-		function bundleMinerMixin() {
-				return Object.assign(
-						this,
-						{
+    const sponge = new Kerl.default()
+    const essenceCopy = essence.slice()
+    const bundle = new Int8Array(BUNDLE_LENGTH)
+    let fittestBundle = { probabilityOfLosing: 1 }
+    let index = offset
+    let running = false
 
-                /**
-                 * Starts searching for bundle that satisfies security threshold.
-                 *
-                 * @method start
-                 *
-                 * @param {number} offset - Offset to resume searching.
-                 */
-								start(offset) {
-										if (running) {
-												throw new Error('Search is already running.')
-										}
+    return {
+        start() {
+            if (running) {
+                throw new Error('Bundle miner is already running!')
+            }
 
-										if (offset) {
-												n = offset
-										}
+            running = true
 
-										running = true
+            while (running && index < offset + count) {
+                essenceCopy.set(valueToTrits(index), ADDRESS_LENGTH + VALUE_LENGTH, OBSOLETE_TAG_LENGTH)
+                sponge.absorb(essenceCopy, 0, essenceCopy.length)
+                sponge.squeeze(bundle, 0, BUNDLE_LENGTH)
 
-										workers.forEach(worker => worker.postMessage(startCommand()))
-								},
-                /**
-                 * Stops searching and kills active threads.
-                 *
-                 * @method stop
-                 */
-								stop() {
-										if (running) {
-												running = false
+                const normalizedBundle = Signing.normalizedBundle(bundle)
 
-												workers.forEach(worker => worker.postMessage(stopCommand))
-										}
-								},
-                /**
-                 * Returns the latest round. Use this to periodically persit the returned offset
-                 * and resume if search has been stopped.
-                 *
-                 * @method getOffset
-                 *
-                 * @return {number}
-                 */
-								getOffset() {
-										return n
-								}
-						},
-						EventEmitter.prototype,
-				)
-		}
+                if (normalizedBundle.indexOf(MAX_TRYTE_VALUE /* 13 */) === -1) {
+                    const probabilityOfLosing = summaryOfLosing(
+                        minNormalizedBundle([signedNormalizedBundle, normalizedBundle], numberOfFragments),
+                        numberOfFragments
+                    )
 
-		// Init workers
-		for (let i = 0; i < numberOfWorkers; i++) {
-				workers.push(new Worker('./src/worker.js'))
-		}
-
-		workers.forEach(worker => {
-				worker.on('message', message => {
-						if (message && Number.isInteger(message.index)) {
-                if (message.dist < opt) {
-								    opt = message.dist
-                    bundleMiner.emit('data', message)
+                    if (probabilityOfLosing < fittestBundle.probabilityOfLosing) {
+                        fittestBundle = {
+                            index,
+                            bundle,
+                            normalizedBundle,
+                            probabilityOfLosing,
+                            tritSecurityLevel: securityLevel(probabilityOfLosing, 3),
+                            bitSecurityLevel: securityLevel(probabilityOfLosing, 2),
+                        }
+                    }
                 }
 
-								// TODO: estimate security level
+                sponge.reset()
 
-								// Stop if required security level is reached
-								if (message.dist < threshold) {
-                    if (running) {
-										    bundleMiner.emit('end', message)
-										    bundleMiner.stop()
-                    }
-										return
-								}
+                index++
+            }
 
-								// Begin next worker round
-								worker.postMessage(startCommand())
-						}
-				})
+            running = false
 
-				worker.on('error', error => bundleMiner.emit('error', error))
-		})
-
-		return bundleMiner
+            return fittestBundle
+        },
+        stop() {
+            running = false
+        },
+    }
 }
 
-
 module.exports = {
-    createBundleMiner,
     minNormalizedBundle,
+    bundleEssence,
+    summaryOfLosing,
+    securityLevel,
+    createBundleMiner,
 }
