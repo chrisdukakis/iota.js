@@ -36,8 +36,8 @@ function bundleEssence(bundle) {
     const bundleCopy = bundle.slice()
     const essence = new Int8Array((bundle.length / TRANSACTION_LENGTH) * TRANSACTION_ESSENCE_LENGTH)
 
-    for (let offset = 0; offset < bundle.length; offset += TRANSACTION_LENGTH) {
-        essence.set(transactionEssence(bundleCopy, offset))
+    for (let i = 0; i < bundle.length / TRANSACTION_LENGTH; i++) {
+        essence.set(transactionEssence(bundleCopy, i * TRANSACTION_LENGTH), i * TRANSACTION_ESSENCE_LENGTH)
     }
 
     return essence
