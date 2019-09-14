@@ -8,9 +8,7 @@ const Signing = require('@iota/signing')
 const {
     ADDRESS_LENGTH,
     VALUE_LENGTH,
-    OBSOLETE_TAG_LENGTH,
     BUNDLE_LENGTH,
-    TAG_LENGTH,
     TRANSACTION_LENGTH,
     TRANSACTION_ESSENCE_LENGTH,
     transactionEssence,
@@ -104,9 +102,6 @@ function createBundleMiner({ signedNormalizedBundle, essence, numberOfFragments,
         throw new Error('Illegal `count` value. Must be a positive integer.')
     }
 
-    const sponge = new Kerl.default()
-    const essenceCopy = essence.slice()
-    const bundle = new Int8Array(BUNDLE_LENGTH)
     let fittestBundle = { probabilityOfLosing: 1 }
     let index = offset
     let running = false
@@ -119,8 +114,13 @@ function createBundleMiner({ signedNormalizedBundle, essence, numberOfFragments,
 
             running = true
 
+            const sponge = new Kerl.default()
+
             while (running && index < offset + count) {
-                essenceCopy.set(valueToTrits(index), ADDRESS_LENGTH + VALUE_LENGTH, OBSOLETE_TAG_LENGTH)
+                const essenceCopy = essence.slice()
+                const bundle = new Int8Array(BUNDLE_LENGTH)
+
+                essenceCopy.set(valueToTrits(index), ADDRESS_LENGTH + VALUE_LENGTH)
                 sponge.absorb(essenceCopy, 0, essenceCopy.length)
                 sponge.squeeze(bundle, 0, BUNDLE_LENGTH)
 
