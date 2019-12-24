@@ -42,18 +42,10 @@ function bundleEssence(bundle) {
 }
 
 function summaryOfLosing(normalizedBundle, numberOfFragments) {
-    let P = 0
+    let P = 1
 
     for (let i = 0; i < numberOfFragments * NORMALIZED_FRAGMENT_LENGTH; i++) {
-        const Pi = 1 - (MAX_TRYTE_VALUE - normalizedBundle[i]) / (MAX_TRYTE_VALUE - MIN_TRYTE_VALUE)
-
-        if (Pi > 0) {
-            if (P === 0) {
-                P = 1
-            }
-
-            P *= Pi
-        }
+        P *= 1 - (MAX_TRYTE_VALUE - normalizedBundle[i]) / (MAX_TRYTE_VALUE - MIN_TRYTE_VALUE + 1)
     }
 
     return P

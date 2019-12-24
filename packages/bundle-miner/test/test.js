@@ -46,12 +46,12 @@ describe('summaryOfLosing()', async assert => {
 
     assert({
         given: 'normalized bundle that gives maximum number of hashing rounds',
-        should: 'return probability of losing equal to 0.',
+        should: 'return correct probability of losing.',
         actual: summaryOfLosing(
             new Int8Array(numberOfFragments * NORMALIZED_FRAGMENT_LENGTH).fill(-13),
             numberOfFragments
         ),
-        expected: 0,
+        expected: 5.085770231417929e-78,
     })
 })
 
@@ -64,6 +64,7 @@ describe('createBundleMiner()', async assert => {
         .map(normalizedBundle)
     const bundle = new Int8Array(TRANSACTION_LENGTH * 4).fill(0)
     const numberOfFragments = 2
+
 
     assert({
         given: 'signed normalized bundle, sweep essence and number of fragments',
